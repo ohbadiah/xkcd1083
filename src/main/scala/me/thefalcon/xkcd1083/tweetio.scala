@@ -4,14 +4,16 @@ import dispatch._
 import oauth._
 
 import com.ning.http.client
+import client.{Response, AsyncCompletionHandler, RequestBuilder}
 import client.oauth.{RequestToken,ConsumerKey}
 
 import cc.spray.json._
 import TwitterJsonProtocol._
 
 
+
 class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
-  type DispatchResult[T] = Promise[Either[String, T]]
+  type DispatchResult[T] = Promise[Either[Throwable, T]]
   
   def timeline: DispatchResult[List[Tweet]] = 
     oauthRequest[List[Tweet]](
@@ -22,14 +24,14 @@ class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
       )
     )
 
-  def friends(screen_name: String = "xkcd1083"): DispatchResult[List[String]] = 
+  def friends(screen_name: String = "xkcd1083"): DispatchResult[FriendResponse] = 
     oauthRequest[FriendResponse](
       twitterApi / "friends" / "ids.json",
       Map(
         "screen_name" -> screen_name,
         "stringify_ids" -> "true"
       )
-    ).right.map{ _.ids }
+    )
 
   def users(ids: List[String]): DispatchResult[List[Twitterer]] = 
     oauthRequest[List[Twitterer]](
@@ -40,26 +42,58 @@ class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
       ),
       isGet = false
     )
+
+  def follow(person: Twitterer): DispatchResult[Twitterer] = 
+    oauthRequest[Twitterer](
+      twitterApi / "friendships" / "create.json",
+      Map(
+        "user_id" -> person.id_str,
+        "screen_name" -> person.screen_name,
+        "follow" -> "true"
+      ),
+      isGet = false
+    )
+
       
   def oauthRequest[T: JsonReader](
-    target: client.RequestBuilder,
+    target: RequestBuilder,
     params: Traversable[(String, String)],
     isGet: Boolean = true
   ): DispatchResult[T] = {
     val bareRequest = if (isGet) target <<? params else target << params
     Http(
-      bareRequest <@ (consumer, accessToken) OK 
-        { _.getResponseBody.asJson.convertTo[T] }
-    ).either.left.map{ 
-      _.getMessage
-    }.right.map { identity }
+      ((bareRequest <@ (consumer, accessToken)).build(), 
+      new RateLimitHandler[T]({_.getResponseBody.asJson.convertTo[T]})
+      )
+    ).either
   }
   
   def twitterApi =
     host("api.twitter.com").secure / "1.1"
 }
 
-object BugHandler extends (client.Response => String) {
-  def apply(r: client.Response) =
-    r.getStatusCode + ": " + r.getResponseBody
+class RateLimitHandler[T](f: Response => T) extends AsyncCompletionHandler[T] {
+    def onCompleted(r: Response) = {
+      val code: Int = r.getStatusCode
+      if (code / 100 == 2)  
+        f(r) 
+      else if (code == 429)
+        throw RateLimitedResponse(r)
+      else throw StatusCode(r.getStatusCode)
+    }
+}
+
+case class RateLimitedResponse(
+  limitResetOption: Option[Int]
+) extends Exception {
+  val defaultTimeoutSecs: Int = 60
+  def limitReset: Int = limitResetOption.getOrElse(defaultTimeoutSecs)
+}
+object RateLimitedResponse {
+  import scala.collection.JavaConversions.collectionAsScalaIterable
+  def apply[T](r: Response): RateLimitedResponse = {
+  RateLimitedResponse(
+      r.getHeaders("X-Rate-Limit-Reset").headOption.map{ _.toInt }
+    )
+  }
 }

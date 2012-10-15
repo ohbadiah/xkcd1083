@@ -19,9 +19,13 @@ object XkcdBuild extends Build {
         "net.databinder.dispatch" %% "core" % "0.9.1",
         "cc.spray" %% "spray-json" % "1.1.1",
         "org.clapper" %% "grizzled-slf4j" % "0.6.9",
+        "com.typesafe.akka" % "akka-actor" % "2.0.3",
         "org.clapper" %% "avsl" % "0.4"
       ),
-      resolvers += ("Sonatype latest" at 
-        "https://oss.sonatype.org/service/local/repositories/releases/content/")
+      resolvers ++= Seq(
+        "Sonatype latest" at 
+          "https://oss.sonatype.org/service/local/repositories/releases/content/",
+        "Typesafe Repository" at 
+          "http://repo.typesafe.com/typesafe/releases/")
   )
 }

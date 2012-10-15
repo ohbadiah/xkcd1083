@@ -6,13 +6,12 @@ import dispatch._
 object Main extends Logging 
   with NicksReqToq {
   def main(args: Array[String]) = {
-   val promise = TweetIO(tok)
+   val promise = new TweetIO(tok).timeline
    for (
      list <- promise.right;
      tweet <- list
    ) {
-     info("tweet")
-     println("@" + tweet.user.screen_name + ": " + tweet.text)
+     info("@" + tweet.user.screen_name + ": " + tweet.text)
    }
 
   }

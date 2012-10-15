@@ -10,11 +10,13 @@ case class Tweet(
 object Tweet
 
 case class Twitterer(
-  id: Int,
+  id_str: String,
   name: String,
   screen_name: String,
   location: String,
-  description: String
+  description: String,
+  followers_count: Long,
+  verified: Boolean
 )
 object Twitterer
 
@@ -27,7 +29,7 @@ object FriendResponse
 
 
 object TwitterJsonProtocol extends DefaultJsonProtocol {
-  implicit val twittererFormat = jsonFormat5(Twitterer.apply)
+  implicit val twittererFormat = jsonFormat7(Twitterer.apply)
   implicit val tweetFormat = jsonFormat2(Tweet.apply)
   implicit val friendResponseFormat = jsonFormat3(FriendResponse.apply)
 }
