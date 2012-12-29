@@ -7,10 +7,8 @@ import com.ning.http.client
 import client.{Response, AsyncCompletionHandler, RequestBuilder}
 import client.oauth.{RequestToken,ConsumerKey}
 
-import cc.spray.json._
+import spray.json._
 import TwitterJsonProtocol._
-
-
 
 class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
   type DispatchResult[T] = Promise[Either[Throwable, T]]

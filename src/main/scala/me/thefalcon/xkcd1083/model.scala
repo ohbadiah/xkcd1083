@@ -1,6 +1,6 @@
 package me.thefalcon.xkcd1083
 
-import cc.spray.json.DefaultJsonProtocol
+import spray.json.DefaultJsonProtocol
 
 case class Tweet(
   user: Twitterer,
