@@ -10,10 +10,14 @@ import client.oauth.{RequestToken,ConsumerKey}
 import spray.json._
 import TwitterJsonProtocol._
 
-class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
-  type DispatchResult[T] = Promise[Either[Throwable, T]]
+import akka.dispatch.{ExecutionContext, Future}
+
+object TweetIO extends Xkcd1083Consumer with NicksReqToq {
+  import PromiseImplicits._
+  implicit def ec: ExecutionContext = 
+    ExecutionContext.fromExecutor(Http.promiseExecutor)
   
-  def timeline: DispatchResult[List[Tweet]] = 
+  def timeline: Future[List[Tweet]] = 
     oauthRequest[List[Tweet]](
       twitterApi / "statuses" / "home_timeline.json",
       Map(
@@ -22,7 +26,7 @@ class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
       )
     )
 
-  def friends(screen_name: String = "xkcd1083"): DispatchResult[FriendResponse] = 
+  def friends(screen_name: String = "xkcd1083"): Future[FriendResponse] = 
     oauthRequest[FriendResponse](
       twitterApi / "friends" / "ids.json",
       Map(
@@ -31,17 +35,17 @@ class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
       )
     )
 
-  def users(ids: List[String]): DispatchResult[List[Twitterer]] = 
+  def users(ids: List[String]): Future[List[Twitterer]] = 
     oauthRequest[List[Twitterer]](
       twitterApi / "users" / "lookup.json",
       Map(
-        "ids" -> ids.mkString(","),
+        "user_id" -> ids.mkString(","),
         "include_entities" -> "false"
       ),
       isGet = false
     )
 
-  def follow(person: Twitterer): DispatchResult[Twitterer] = 
+  def follow(person: Twitterer): Future[Twitterer] = 
     oauthRequest[Twitterer](
       twitterApi / "friendships" / "create.json",
       Map(
@@ -57,10 +61,10 @@ class TweetIO(accessToken: RequestToken) extends Xkcd1083Consumer {
     target: RequestBuilder,
     params: Traversable[(String, String)],
     isGet: Boolean = true
-  ): DispatchResult[T] = {
+  ): Future[T] = {
     val bareRequest = if (isGet) target <<? params else target << params
     Http(
-      ((bareRequest <@ (consumer, accessToken)).build(), 
+      ((bareRequest <@ (consumer, tok)).build(), 
       new RateLimitHandler[T]({_.getResponseBody.asJson.convertTo[T]})
       )
     ).either
