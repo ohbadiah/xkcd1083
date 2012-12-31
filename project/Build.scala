@@ -18,7 +18,7 @@ object XkcdBuild extends Build {
       scalaVersion := "2.9.2",
       libraryDependencies ++= Seq(
         "net.databinder.dispatch" %% "core" % "0.9.1",
-        "io.spray" %%  "spray-json" % "1.2.2" cross CrossVersion.full,
+        "io.spray" %%  "spray-json" % "1.2.3" cross CrossVersion.full,
         "org.clapper" %% "grizzled-slf4j" % "0.6.9",
         "com.typesafe.akka" % "akka-actor" % "2.0.3",
         "com.typesafe.akka" % "akka-testkit" % "2.0.3" % "test",
