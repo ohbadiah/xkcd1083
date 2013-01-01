@@ -1,4 +1,4 @@
-package me.thefalcon.xkcd1083
+package xkcd1083.test
 
 import org.scalatest.FunSuite
 import akka.actor._
@@ -6,6 +6,8 @@ import akka.util.duration._
 import akka.dispatch.{Await, Future}
 import akka.testkit.TestActorRef
 import akka.pattern.ask
+
+import xkcd1083._
 
 class TwitterActorSuite extends FunSuite {
   implicit val system = ActorSystem("TestSystem")

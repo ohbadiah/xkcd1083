@@ -1,4 +1,4 @@
-package me.thefalcon.xkcd1083
+package xkcd1083
 
 import dispatch._
 import oauth._
