@@ -10,11 +10,15 @@ object FollowerActors extends NicksReqToq {
     import Friends._
     
     def receive = {
-      case Work(screen_name) => {
+      case Work(screen_name, next_cursor_str) => {
         val sender = this.sender
-        val future = TweetIO.friends(screen_name)
+        val future = TweetIO.friends(screen_name, next_cursor_str)
         future onSuccess {
           case fr => sender ! Return(screen_name, fr.ids)
+        }
+        future onFailure {
+          case RateLimitedResponse(timeout) =>
+            sender ! RateLimited(timeout) 
         }
       }
     }
@@ -31,20 +35,15 @@ object FollowerActors extends NicksReqToq {
           case friends => sender ! Return(screen_name, friends)
         }
         future onFailure {
-          case thr => thr match {
-            case RateLimitedResponse(timeoutOpt) =>
-              sender ! RateLimitWarning(timeoutOpt)
-            case _ =>
-              println(thr.getMessage)
-              sender ! HttpErr(thr.getMessage)
-          }
+          case RateLimitedResponse(timeout) =>
+            sender ! RateLimited(timeout) 
         }
     }
   }
 
   class FollowFinder extends Actor {
     import WhoToFollow._ 
-    val officeTitles = List(
+    private[this] val officeTitles = Set(
       "President",
       "Governor",
       "Mayor",
@@ -57,14 +56,12 @@ object FollowerActors extends NicksReqToq {
       "Senator",
       "Prime Minister",
       "Parliament"
-    ).map{ _.r }
+    )
 
-    def shouldFollow(person: Twitterer): Boolean = 
-      officeTitles.exists {
-        ! _.findFirstIn(person.description).isEmpty
-      } && 
+    private[this] def shouldFollow(person: Twitterer): Boolean = 
+      person.verified &&
       person.followers_count >= 25000 &&
-      person.verified
+      (officeTitles & person.description.split(" ").toSet).size > 0
 
     def receive = {
       case Work(screen_name, people) =>
@@ -81,40 +78,34 @@ object FollowerActors extends NicksReqToq {
     import FollowHim._
 
     def receive = {
-      case Work(person) =>
+      case Work(id_str) =>
         val sender = this.sender
-        val future = TweetIO.follow(person)
+        val future = TweetIO.follow(id_str)
         future onSuccess {
-          case _ => sender ! Return(person.screen_name)
+          case person => sender ! Return(person)
         }
-        /*for (thr <- promise.left)
-          sender ! HttpErr(thr.getMessage)*/
     }
   }
 
-  sealed trait FollowerTask
   sealed trait FollowerMessage
   type FMsg = FollowerMessage
-  object Friends extends FollowerTask {
+  object Friends {
     case class Work(screen_name: String) extends FMsg
     case class Return(screen_name: String, ids: List[String]) extends FMsg
-    case class RateLimitWarning(timeoutOpt: Option[Int]) extends FMsg
-    case class HttpErr(errmsg: String) extends FMsg
+    case class RateLimited(timeoutOpt: Option[Int]) extends FMsg
   }
-  object FriendInfo extends FollowerTask {
+  object FriendInfo {
     case class Work(screen_name: String, ids: List[String]) extends FMsg
     case class Return(screen_name: String, people: List[Twitterer]) extends FMsg
-    case class RateLimitWarning(timeoutOpt: Option[Int]) extends FMsg
-    case class HttpErr(errmsg: String) extends FMsg
+    case class RateLimited(timeoutOpt: Option[Int]) extends FMsg
   }
-  object WhoToFollow extends FollowerTask {
+  object WhoToFollow {
     case class Work(screen_name: String, people: List[Twitterer]) extends FMsg
     case class Return(screen_name: String, people: List[Twitterer]) extends FMsg
   }
-  object FollowHim extends FollowerTask {
-    case class Work(person: Twitterer) extends FMsg 
-    case class Return(screen_name: String) extends FMsg
-    case class HttpErr(errmsg: String) extends FMsg
+  object FollowHim {
+    case class Work(id_str: String) extends FMsg 
+    case class Return(person: Twitterer) extends FMsg
   }
 
 }

@@ -26,11 +26,15 @@ object TweetIO extends Xkcd1083Consumer with NicksReqToq {
       )
     )
 
-  def friends(screen_name: String = "xkcd1083"): Future[FriendResponse] = 
+  def friends(
+    screen_name: String = "xkcd1083", 
+    cursor_str: String = "-1"
+  ): Future[FriendResponse] = 
     oauthRequest[FriendResponse](
       twitterApi / "friends" / "ids.json",
       Map(
         "screen_name" -> screen_name,
+        "cursor" -> cursor_str,
         "stringify_ids" -> "true"
       )
     )
@@ -45,12 +49,11 @@ object TweetIO extends Xkcd1083Consumer with NicksReqToq {
       isGet = false
     )
 
-  def follow(person: Twitterer): Future[Twitterer] = 
+  def follow(id_str: String): Future[Twitterer] = 
     oauthRequest[Twitterer](
       twitterApi / "friendships" / "create.json",
       Map(
-        "user_id" -> person.id_str,
-        "screen_name" -> person.screen_name,
+        "user_id" -> id_str,
         "follow" -> "true"
       ),
       isGet = false

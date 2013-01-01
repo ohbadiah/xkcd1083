@@ -21,8 +21,8 @@ case class Twitterer(
 object Twitterer
 
 case class FriendResponse(
-  previous_cursor: Int,
-  next_cursor: Int,
+  previous_cursor_str: String,
+  next_cursor_str: String,
   ids: List[String]
 )
 object FriendResponse
