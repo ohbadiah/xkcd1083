@@ -19,6 +19,7 @@ object FollowerActors extends NicksReqToq {
       }
     }
   }
+
   class FriendInfoGetter extends Actor {
     import FriendInfo._
 
@@ -48,8 +49,10 @@ object FollowerActors extends NicksReqToq {
       "Governor",
       "Mayor",
       "Senator",
-      "Congressman",
-      "Congresswoman",
+      "Senate",
+      "House",
+      "Congress",
+      "Congressional",
       "Representative",
       "Senator",
       "Prime Minister",

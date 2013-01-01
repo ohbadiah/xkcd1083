@@ -31,5 +31,15 @@ class TwitterActorSuite extends FunSuite {
     assert(! result.people.isEmpty && result.people.head.verified)
   }
 
+  test("We think we should follow everyone we follow.") {
+    val future = for {
+      friend_ids <- TweetIO.friends("xkcd1083")
+      friends  <- TweetIO.users(friend_ids.ids)
+      shouldFollow <- TestActorRef[FollowFinder] ? WhoToFollow.Work("xkcd1083", friends) 
+    } yield (friends, shouldFollow)
+    val (l1, ret) = Await.result(future, timeout.duration)
+      .asInstanceOf[(List[Twitterer], WhoToFollow.Return)]
+    assert((l1 -- ret.people) isEmpty)
+  }
 }
 

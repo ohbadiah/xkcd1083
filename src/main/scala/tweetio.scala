@@ -55,7 +55,6 @@ object TweetIO extends Xkcd1083Consumer with NicksReqToq {
       ),
       isGet = false
     )
-
       
   def oauthRequest[T: JsonReader](
     target: RequestBuilder,
