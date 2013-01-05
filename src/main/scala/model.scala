@@ -13,8 +13,8 @@ case class Twitterer(
   id_str: String,
   name: String,
   screen_name: String,
-  location: String,
-  description: String,
+  location: Option[String],
+  description: Option[String],
   followers_count: Long,
   verified: Boolean
 )

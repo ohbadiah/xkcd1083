@@ -15,20 +15,23 @@ object XkcdBuild extends Build {
       version := "0.1",
       organization := "me.thefalcon",
       name := "xkcd1083",
-      scalaVersion := "2.9.2",
+      scalaVersion := "2.10.0",
       libraryDependencies ++= Seq(
         "net.databinder.dispatch" %% "core" % "0.9.1",
-        "io.spray" %%  "spray-json" % "1.2.3" cross CrossVersion.full,
-        "org.clapper" %% "grizzled-slf4j" % "0.6.9",
-        "com.typesafe.akka" % "akka-actor" % "2.0.3",
-        "com.typesafe.akka" % "akka-testkit" % "2.0.3" % "test",
-        "org.clapper" %% "avsl" % "0.4",
-        "org.scalatest" %% "scalatest" % "1.8" % "test"
+        "io.spray" %%  "spray-json" % "1.2.3", 
+        "org.clapper" %% "grizzled-slf4j" % "1.0.1",
+        "com.typesafe.akka" %% "akka-actor" % "2.1.0",
+        "com.typesafe.akka" %% "akka-testkit" % "2.1.0" % "test",
+        "org.clapper" %% "avsl" % "1.0",
+        "org.scalatest" %% "scalatest" % "1.9.1" % "test"
       ),
       resolvers ++= Seq(
         "Sonatype latest" at 
           "https://oss.sonatype.org/service/local/repositories/releases/content/",
         "Typesafe Repository" at 
-          "http://repo.typesafe.com/typesafe/releases/")
+          "http://repo.typesafe.com/typesafe/releases/",
+        "Spray Repository" at 
+          "http://repo.spray.io/"),
+      scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature")
   )
 }

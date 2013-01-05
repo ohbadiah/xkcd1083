@@ -1,18 +1,19 @@
 package xkcd1083
 
 import grizzled.slf4j.Logging
-import dispatch._
+import dispatch.Http
+
+import akka.actor.{ActorSystem, Props}
 
 object Main extends Logging 
   with NicksReqToq with App {
   override def main(args: Array[String]) = {
-    val future = TweetIO.timeline
-    future onSuccess {
-      case list =>
-        list foreach { tw: Tweet =>  
-          info("@" + tw.user.screen_name + ": " + tw.text)
-        }
-        Http.shutdown
-    }
+      import FollowerTrawler.{TrawlerSupervisor, Start}
+      val system = ActorSystem("TrawlerSystem")
+      val sup = system.actorOf(
+        Props[TrawlerSupervisor],
+        name="Supervisor"
+      )
+      sup ! Start
   }
 }

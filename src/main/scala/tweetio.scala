@@ -10,7 +10,7 @@ import client.oauth.{RequestToken,ConsumerKey}
 import spray.json._
 import TwitterJsonProtocol._
 
-import akka.dispatch.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 object TweetIO extends Xkcd1083Consumer with NicksReqToq {
   import PromiseImplicits._
@@ -27,13 +27,13 @@ object TweetIO extends Xkcd1083Consumer with NicksReqToq {
     )
 
   def friends(
-    screen_name: String = "xkcd1083", 
+    user_id: String = "705215413", 
     cursor_str: String = "-1"
   ): Future[FriendResponse] = 
     oauthRequest[FriendResponse](
       twitterApi / "friends" / "ids.json",
       Map(
-        "screen_name" -> screen_name,
+        "user_id" -> user_id,
         "cursor" -> cursor_str,
         "stringify_ids" -> "true"
       )
@@ -90,7 +90,7 @@ class RateLimitHandler[T](f: Response => T) extends AsyncCompletionHandler[T] {
 case class RateLimitedResponse(
   limitResetOption: Option[Int]
 ) extends Exception {
-  val defaultTimeoutSecs: Int = 60
+  val defaultTimeoutSecs: Int = 60 // NM config
   def limitReset: Int = limitResetOption.getOrElse(defaultTimeoutSecs)
 }
 object RateLimitedResponse {
