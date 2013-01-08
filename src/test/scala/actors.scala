@@ -2,16 +2,17 @@ package xkcd1083.test
 
 import org.scalatest.FunSuite
 import akka.actor._
-import akka.util.duration._
-import akka.dispatch.{Await, Future}
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 import akka.testkit.TestActorRef
 import akka.pattern.ask
+import scala.concurrent.ExecutionContext.Implicits.global
 
 import xkcd1083._
 
 class TwitterActorSuite extends FunSuite {
   implicit val system = ActorSystem("TestSystem")
-  implicit val timeout = akka.util.Timeout(3 seconds)
+  implicit val timeout = akka.util.Timeout(3.seconds)
   import FollowerTrawler._
 
   test("We follow people.") {
@@ -39,7 +40,7 @@ class TwitterActorSuite extends FunSuite {
     } yield (friends, shouldFollow)
     val (l1, ret) = Await.result(future, timeout.duration)
       .asInstanceOf[(List[Twitterer], FollowFinder.Return)]
-    assert((l1 filterNot (ret.people contains)) isEmpty)
+    assert((l1 filterNot (ret.people.contains)).isEmpty)
   }
 
   test("We already follow Barack Obama.") {
