@@ -2,117 +2,150 @@ package xkcd1083
 
 import grizzled.slf4j.Logging
 
-import akka.actor._
+import akka.actor.{Actor, ActorRef, Props, FSM}
 import scala.concurrent.Future
-import akka.routing.RoundRobinRouter
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 
 import dispatch.StatusCode
 
-import scala.collection.mutable.Queue
+import scala.collection.immutable.Queue
 
 object FollowerTrawler extends NicksReqToq {
+    
+  class PeopleMachine extends Actor with FSM[PMState, PMData] with Logging {
+    import PeopleMachine._
+
+    val friendGetter = context.actorOf(Props[FriendGetter])
+    val friendInfo = context.actorOf(Props[FriendInfoGetter])
+
+    startWith(Uninitialized, Empty)
+
+    when(Uninitialized) {
+      case Event(Start, Empty) =>
+        TweetIO.friends() onSuccess { case frResp =>
+          self ! QueueUp(frResp.ids)
+        }
+        stay using HaveSender(sender)
+
+      case Event(QueueUp(ids), HaveSender(ref)) =>
+        val (current_user, q) = (Queue.empty enqueue ids).dequeue
+        self ! Start
+        info("Uninitialized -> GettingIds")
+        goto(GettingIds) using HaveUser(ref, Cursor(current_user, "-1"), q)
+    }
+
+    when(GettingIds) {
+      case Event(Start, data@HaveUser(_, Cursor(id, cursor_str), _)) =>
+        friendGetter ! Friends.Work(id, cursor_str)
+        stay using data
+
+      case Event(Continue, HaveUser(ref, Cursor(_, "0"), q)) =>
+        if (q.isEmpty) {
+          info("GettingIds -> Uninitialized (Finished!)")
+          goto(Uninitialized) using HaveSender(ref)
+        }
+        else {
+          val (front, back) = q.dequeue
+          self ! Continue
+          stay using HaveUser(ref, Cursor(front, "-1"), back)
+        }
+  
+      case Event(Continue, HaveUser(ref, Cursor(id, cursor_str), q)) =>
+        friendGetter ! Friends.Work(id, cursor_str)
+        stay using HaveUser(ref, Cursor(id, "-1"), q)
+    
+      case Event(Friends.Return(user_id, cursor_str, Nil), data: HaveUser) =>
+        self ! Continue
+        stay using data.withCursor(Cursor(user_id, cursor_str))
+ 
+      case Event(Friends.Return(user_id, next_cursor_str, ids), 
+        HaveUser(ref, _, q)) =>
+        val status = Cursor(user_id, next_cursor_str)
+        val jobs = Queue.empty ++ ids.grouped(100).map{ //NM Config
+          FriendInfo.Work(user_id, _)
+        }
+        self ! Start
+        info("GettingIds -> PopulatingIds")
+        goto(PopulatingIds) using 
+          HaveJobs(HaveUser(ref, status, q), jobs) 
+
+      case Event(Friends.RateLimited(limitReset, job), data: HaveUser) =>
+        info("FriendGetter rate limited for " + limitReset + "seconds.")
+        context.system.scheduler.scheduleOnce(limitReset.seconds) {
+          friendGetter ! job 
+        }
+        stay using data
+
+      case Event(Friends.HttpErr(code, job), data: HaveUser) =>
+        info("FriendGetter HTTP " + code)
+        friendGetter ! job 
+        stay using data
+    }
+
+    when(PopulatingIds) {
+      case Event(Start, HaveJobs(user, jobs)) if jobs.isEmpty => 
+        self ! Continue
+        info("PopulatingIds -> GettingIds")
+        goto(GettingIds) using user
+
+      case Event(Start, HaveJobs(user, jobs)) => 
+        val (front, back) = jobs.dequeue
+        friendInfo ! front
+        stay using HaveJobs(user, back)
+
+      case Event(ret: FriendInfo.Return, HaveJobs(user, jobs)) =>
+        user.ref ! ret
+        if (jobs.isEmpty) {
+          info("PopulatingIds -> GettingIds")
+          self ! Continue
+          goto(GettingIds) using user
+        }
+        else {
+          val (front, back) = jobs.dequeue
+          friendInfo ! front
+          stay using HaveJobs(user, back)
+        }
+      
+      case Event(FriendInfo.RateLimited(limitReset, job), data: HaveJobs) => 
+        info("FriendInfo rate limited for " + limitReset + " seconds.")
+        context.system.scheduler.scheduleOnce(limitReset.seconds) {
+          friendInfo ! job
+        }
+        stay using data
+
+      case Event(FriendInfo.HttpErr(code, job), data: HaveJobs) =>
+        info("FriendInfo HTTP " + code)
+        friendInfo ! job
+        stay using data 
+    }
+  }
 
   class TrawlerSupervisor extends Actor with Logging {
     import TrawlerSupervisor._
 
-    val friendQueue: Queue[String] = Queue.empty
-    val infoQueue: Queue[FriendInfo.Work] = Queue.empty
-    val followQueue: Queue[Follower.Work] = Queue.empty
-    var next_cursor_str = "-1"
-    val friendGetterRouter = context.actorOf(Props[FriendGetter]
-      withRouter(RoundRobinRouter(1)), name="FriendGetterRouter")
-    val friendInfoRouter = context.actorOf(Props[FriendInfoGetter]
-      withRouter(RoundRobinRouter(2)), name="FriendInfoRouter")
-    val followFinderRouter = context.actorOf(Props[FollowFinder]
-      withRouter(RoundRobinRouter(2)), name="FollowFinder")
-    val followerRouter = context.actorOf(Props[Follower]
-      withRouter(RoundRobinRouter(2)), name="Follower")
+    val peopleMachine = context.actorOf(Props[PeopleMachine])
+    val followFinder = context.actorOf(Props[FollowFinder])
+    val follower = context.actorOf(Props[Follower])
 
     def receive = {
       case Start =>
-        info("Starting.")
-        if (friendQueue.isEmpty) 
-          TweetIO.friends() onSuccess { case frResp =>
-            info("Telling self to queue " + frResp.ids.size + " ids.")
-            self ! QueueUp(frResp.ids)
-          }
-        else friendGetterRouter ! 
-          Friends.Work(friendQueue.front, next_cursor_str)
+        peopleMachine ! Start
 
-      case QueueUp(ids) =>
-        info("Received QueueUp.")
-        friendQueue ++= ids
-        if (! friendQueue.isEmpty) self ! TrawlNext
-
-      case TrawlNext =>
-        info("Received TrawlNext.")
-        next_cursor_str = "-1"
-        friendGetterRouter ! Friends.Work(friendQueue.front, next_cursor_str)
-
-      case Friends.Return(user_id, cursor_str, ids) =>
-        info("Got back " + ids.size + " followers of " + user_id)
-        next_cursor_str = cursor_str
-        if (next_cursor_str == "0") {
-          info("Got to end of " + user_id + "'s followers!")
-          friendQueue.dequeue
-          self ! TrawlNext
-        }
-        val wasEmpty = infoQueue.isEmpty
-        infoQueue ++= ids.grouped(100) map { //NM config
-          FriendInfo.Work(user_id, _)
-        }
-        friendInfoRouter ! infoQueue.dequeue
-
-      case Friends.RateLimited(limitReset, cursor_str) =>
-        info("Friends rate limited with " + limitReset + " seconds left.")
-        next_cursor_str = cursor_str
-        val front = friendQueue.front
-        context.system.scheduler.scheduleOnce(limitReset.seconds) {
-          friendGetterRouter ! Friends.Work(front, next_cursor_str)
-        }
-     
-      case Friends.HttpErr(code, cursor_str) =>
-        info("HTTP Error " + code + " on friend request.")
-        friendGetterRouter ! Friends.Work(friendQueue.front, next_cursor_str) 
       case FriendInfo.Return(user_id, people) =>
-        info("FriendInfo returned with " + people.size + " people.")
-        followFinderRouter ! FollowFinder.Work(user_id, people)
-        if (infoQueue.isEmpty) {
-          if (friendQueue.nonEmpty) 
-            friendGetterRouter ! 
-              Friends.Work(friendQueue.front, next_cursor_str) 
-        } 
-        else { friendInfoRouter ! infoQueue.dequeue }
-      
-      case FriendInfo.RateLimited(limitReset, job) => 
-        info("FriendInfo rate limited with " + limitReset + " seconds left till reset.")
-        infoQueue.enqueue(job)
-        val nextJob = infoQueue.dequeue
-        context.system.scheduler.scheduleOnce(limitReset.seconds) {
-          friendInfoRouter ! nextJob
-        }
-  
-      case FriendInfo.HttpErr(code, job) =>
-        info("HTTP Error " + code + " on friend info request.")
-        infoQueue.enqueue(job)
-        friendInfoRouter ! infoQueue.dequeue
+        info("Supervisor got back " + people.size + " people.")
+        followFinder ! FollowFinder.Work(user_id, people)
 
       case FollowFinder.Return(user_id, people@_::_) =>
-        info("Got back " + people.size + " people to follow!")
-        followQueue ++= people map 
-          {tw: Twitterer =>  Follower.Work(tw.id_str) }
-        followerRouter ! followQueue.dequeue  
+        people foreach {tw: Twitterer =>  
+          follower ! Follower.Work(tw.id_str) 
+        }
 
-      case Follower.Return(person) =>
+      case Follower.Return(person) => 
         info("Followed " + person)
-        if (! followQueue.isEmpty) followerRouter ! followQueue.dequeue
        
       case Follower.HttpErr(code, job) =>
-        info("HTTP Error " + code + " when following.")
-        followQueue.enqueue(job)
-        followerRouter ! followQueue.dequeue 
+        follower ! job
     }
   }
 
@@ -120,19 +153,20 @@ object FollowerTrawler extends NicksReqToq {
     import Friends._
     
     def receive = {
-      case Work(user_id, next_cursor_str) => {
+      case job@Work(user_id, next_cursor_str) => {
         val sender = this.sender
         val future = TweetIO.friends(user_id, next_cursor_str)
         future onSuccess {
           case fr => sender ! Return(user_id, fr.next_cursor_str, fr.ids)
         }
         future onFailure {
-          case r: RateLimitedResponse =>
-            sender ! RateLimited(r.limitReset, next_cursor_str) 
-          case sc: StatusCode =>
-            sender ! HttpErr(sc.code, next_cursor_str)
-          case thr =>
-            sys.error("Unhandled error! " + thr.getMessage)
+          case rte: RuntimeException => rte.getCause match {
+            case r@RateLimitedResponse(_) =>
+              sender ! RateLimited(r.limitReset, job) 
+            case StatusCode(code) =>
+              sender ! HttpErr(code, job)
+            }
+          case thr => ()
         }
       }
     }
@@ -148,14 +182,14 @@ object FollowerTrawler extends NicksReqToq {
         future onSuccess {
           case friends => sender ! Return(screen_name, friends)
         }
-        future onFailure { case thr => thr match {
-          case r: RateLimitedResponse =>
-            sender ! RateLimited(r.limitReset, job) 
-          case sc: StatusCode =>
-            sender ! HttpErr(sc.code, job)
-          case thr =>
-            sys.error("Unhandled error! " + thr.getMessage)
-        }}
+        future onFailure { 
+          case rte: RuntimeException => rte.getCause match {
+            case StatusCode(code) => sender ! HttpErr(code, job)
+            case r@RateLimitedResponse(_) => 
+              sender ! RateLimited(r.limitReset, job)
+            }
+          case thr => ()
+        }
     }
   }
 
@@ -174,18 +208,29 @@ object FollowerTrawler extends NicksReqToq {
       "Senator",
       "Minister",
       "Parliament",
+      "MP",
       "Secretary"
     )
 
     private[this] val foils = Set(
       "correspondent",
       "journalist",
-      "host"
+      "host",
+      "report",
+      "reporter",
+      "anchor",
+      "contributor",
+      "press",
+      "correspondent",
+      "ceo",
+      "adviser",
+      "singer"
     )
 
     private[this] def shouldFollow(person: Twitterer): Boolean = {
-      lazy val wordSet = person.description.getOrElse("").filter
-        { _.isLetter }.split(" ").toSet
+      lazy val wordSet = person.description.getOrElse("").filter{ c: Char => 
+        c.isLetter || c.isWhitespace 
+      }.split(" ").toSet
       person.verified &&
       person.followers_count >= 25000 &&
       (officeTitles & wordSet).size > 0  &&
@@ -214,18 +259,21 @@ object FollowerTrawler extends NicksReqToq {
         future onSuccess {
           case person => sender ! Return(person)
         }
-        future onFailure { case thr => thr match {
-          case StatusCode(code) =>
-            sender ! HttpErr(code, job)
-          case thr =>
-            sys.error("Unhandled error! " + thr.getMessage)
-        }}
+        future onFailure { 
+          case rte: RuntimeException => rte.getCause match {
+            case StatusCode(code) =>
+              sender ! HttpErr(code, job)
+            }
+          case thr => ()
+            
+        }
     }
   }
 
   sealed trait FollowerMessage
   type FMsg = FollowerMessage
   case object Start extends FMsg
+
   object Friends {
     case class Work(user_id: String, next_cursor_str: String) extends FMsg
     case class Return(
@@ -233,8 +281,8 @@ object FollowerTrawler extends NicksReqToq {
       next_cursor_str: String, 
       ids: List[String]
     ) extends FMsg
-    case class RateLimited(timeoutOpt: Int, next_cursor_str: String) extends FMsg
-    case class HttpErr(statusCode: Int, next_cursor_str: String) extends FMsg
+    case class RateLimited(timeoutOpt: Int, job: Work) extends FMsg
+    case class HttpErr(statusCode: Int, job: Work) extends FMsg
   }
   object FriendInfo {
     case class Work(user_id: String, ids: List[String]) extends FMsg
@@ -252,8 +300,40 @@ object FollowerTrawler extends NicksReqToq {
     case class HttpErr(statusCode: Int, job: Work) extends FMsg
   }
   object TrawlerSupervisor {
-    case class QueueUp(ids: Traversable[String]) extends FMsg
     case object TrawlNext extends FMsg
   }
 
+
+  sealed trait PMState
+  sealed trait PMData
+  object PeopleMachine {
+    case object Continue extends FMsg
+    case class QueueUp(ids: List[String]) extends FMsg
+
+    case object Uninitialized extends PMState
+    case object GettingIds extends PMState
+    case object PopulatingIds extends PMState
+    case object Inconsistent extends PMState
+    
+    case object Empty extends PMData
+
+    case class Cursor(
+      user_id: String, 
+      next_cursor_str: String
+    ) extends PMData
+    case class HaveSender(ref: ActorRef) extends PMData
+
+    case class HaveUser(
+      ref: ActorRef, 
+      current: Cursor, 
+      backlog: Queue[String]
+    ) extends PMData {
+      def withCursor(other: Cursor) = HaveUser(ref, other, backlog)
+    }
+
+    case class HaveJobs(
+      user: HaveUser,
+      jobs: Queue[FriendInfo.Work]
+    ) extends PMData
+  }
 }

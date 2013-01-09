@@ -90,8 +90,9 @@ class RateLimitHandler[T](f: Response => T) extends AsyncCompletionHandler[T] {
 case class RateLimitedResponse(
   limitResetOption: Option[Int]
 ) extends Exception {
+  private[this] val now = (System.currentTimeMillis / 1000).toInt
   val defaultTimeoutSecs: Int = 60 // NM config
-  def limitReset: Int = limitResetOption.getOrElse(defaultTimeoutSecs)
+  def limitReset: Int = limitResetOption map {_ - now} getOrElse(defaultTimeoutSecs)
 }
 object RateLimitedResponse {
   import scala.collection.JavaConversions.collectionAsScalaIterable
