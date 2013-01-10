@@ -5,8 +5,7 @@ import dispatch.Http
 
 import akka.actor.{ActorSystem, Props}
 
-object Main extends Logging 
-  with NicksReqToq with App {
+object Main extends Logging with App {
   override def main(args: Array[String]) = {
       import FollowerTrawler.{TrawlerSupervisor, Start}
       val system = ActorSystem("TrawlerSystem")

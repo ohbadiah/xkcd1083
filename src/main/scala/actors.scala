@@ -3,6 +3,7 @@ package xkcd1083
 import grizzled.slf4j.Logging
 
 import akka.actor.{Actor, ActorRef, Props, FSM}
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -11,7 +12,7 @@ import dispatch.StatusCode
 
 import scala.collection.immutable.Queue
 
-object FollowerTrawler extends NicksReqToq {
+object FollowerTrawler extends HasConfig {
     
   class PeopleMachine extends Actor with FSM[PMState, PMData] with Logging {
     import PeopleMachine._
@@ -62,7 +63,7 @@ object FollowerTrawler extends NicksReqToq {
       case Event(Friends.Return(user_id, next_cursor_str, ids), 
         HaveUser(ref, _, q)) =>
         val status = Cursor(user_id, next_cursor_str)
-        val jobs = Queue.empty ++ ids.grouped(100).map{ //NM Config
+        val jobs = Queue.empty ++ ids.grouped(TweetIO.maxUsersPerRequest).map{
           FriendInfo.Work(user_id, _)
         }
         self ! Start
@@ -195,48 +196,41 @@ object FollowerTrawler extends NicksReqToq {
 
   class FollowFinder extends Actor {
     import FollowFinder._ 
-    private[this] val officeTitles = Set(
-      "President",
-      "Governor",
-      "Mayor",
-      "Senator",
-      "Senate",
-      "House",
-      "Congress",
-      "Congressional",
-      "Representative",
-      "Senator",
-      "Minister",
-      "Parliament",
-      "MP",
-      "Secretary"
-    )
 
-    private[this] val foils = Set(
-      "correspondent",
-      "journalist",
-      "host",
-      "report",
-      "reporter",
-      "anchor",
-      "contributor",
-      "press",
-      "correspondent",
-      "ceo",
-      "adviser",
-      "singer"
-    )
+    private[xkcd1083] val officeTitles =
+      words(config.get("following", "office_titles"))
 
-    private[this] def shouldFollow(person: Twitterer): Boolean = {
-      lazy val wordSet = person.description.getOrElse("").filter{ c: Char => 
-        c.isLetter || c.isWhitespace 
-      }.split(" ").toSet
-      person.verified &&
-      person.followers_count >= 25000 &&
+    private[xkcd1083] val foils = 
+      words(config.get("following", "foil_words"))
+    
+    private[xkcd1083] val min_followers = {
+      config.get("following", "minimum_followers").filter{ 
+        _.forall{c: Char => c.isDigit}
+      }.map{ _.toInt }.getOrElse(25000)
+    }
+    
+    private[xkcd1083] val mustBeVerified = {
+      config.get("following", "verified").filter{ w: String => 
+        w == "true" || w == "false"
+      }.map{ _.toBoolean }.getOrElse(true)
+    }
+
+    private[xkcd1083] def words(opt: Option[String]): Set[String] = 
+      Set.empty ++ opt.getOrElse("").split(" ")
+    
+    private[xkcd1083] def descProcess(person: Twitterer): Set[String] =
+      words(person.description).map{ _.filter{c: Char => 
+        c.isLetterOrDigit || c.isWhitespace 
+      }}
+
+    private[xkcd1083] def shouldFollow(person: Twitterer): Boolean = {
+      lazy val wordSet = descProcess(person)
+
+      (person.verified || !mustBeVerified) &&
+      person.followers_count >= min_followers &&
       (officeTitles & wordSet).size > 0  &&
       (foils & wordSet.map{_.toLowerCase}).size == 0
     }
-
 
     def receive = {
       case Work(screen_name, people) =>

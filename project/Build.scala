@@ -18,6 +18,7 @@ object XkcdBuild extends Build {
       scalaVersion := "2.10.0",
       libraryDependencies ++= Seq(
         "org.clapper" % "grizzled-slf4j_2.10" % "1.0.1",
+        "org.clapper" % "grizzled-scala_2.10" % "1.1.2",
         "net.databinder.dispatch" %% "dispatch-core" % "0.9.5",
         "io.spray" %%  "spray-json" % "1.2.3", 
         "com.typesafe.akka" %% "akka-actor" % "2.1.0",

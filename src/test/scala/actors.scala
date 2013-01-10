@@ -40,7 +40,6 @@ class TwitterActorSuite extends FunSuite {
     val (l1, ret) = Await.result(future, timeout.duration)
       .asInstanceOf[(List[Twitterer], FollowFinder.Return)]
     val difference = l1 filterNot (ret.people.contains)
-    difference foreach println
     assert(difference.isEmpty)
   }
 

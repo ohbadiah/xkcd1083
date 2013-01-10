@@ -12,7 +12,7 @@ import TwitterJsonProtocol._
 
 import scala.concurrent.{ExecutionContext, Future}
 
-object TweetIO extends Xkcd1083Consumer with NicksReqToq {
+object TweetIO extends HasConsumerKey with HasAccessToken {
   import PromiseImplicits._
   implicit def ec: ExecutionContext = 
     ExecutionContext.fromExecutor(Http.promiseExecutor)
@@ -39,6 +39,7 @@ object TweetIO extends Xkcd1083Consumer with NicksReqToq {
       )
     )
 
+  val maxUsersPerRequest = 100
   def users(ids: List[String]): Future[List[Twitterer]] = 
     oauthRequest[List[Twitterer]](
       twitterApi / "users" / "lookup.json",
@@ -66,7 +67,7 @@ object TweetIO extends Xkcd1083Consumer with NicksReqToq {
   ): Future[T] = {
     val bareRequest = if (isGet) target <<? params else target << params
     Http(
-      ((bareRequest <@ (consumer, tok)).build(), 
+      ((bareRequest <@ (consumerKey, accessToken)).build(), 
       new RateLimitHandler[T]({_.getResponseBody.asJson.convertTo[T]})
       )
     ).either
@@ -91,8 +92,9 @@ case class RateLimitedResponse(
   limitResetOption: Option[Int]
 ) extends Exception {
   private[this] val now = (System.currentTimeMillis / 1000).toInt
-  val defaultTimeoutSecs: Int = 60 // NM config
-  def limitReset: Int = limitResetOption map {_ - now} getOrElse(defaultTimeoutSecs)
+  val defaultTimeoutSecs: Int = 60
+  def limitReset: Int = limitResetOption map 
+    {_ - now} getOrElse(defaultTimeoutSecs)
 }
 object RateLimitedResponse {
   import scala.collection.JavaConversions.collectionAsScalaIterable
