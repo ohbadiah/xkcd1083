@@ -1,0 +1,23 @@
+# Rename your config file `config`.
+
+[oauth]
+# Information for the application's API key.
+consumer_key: 
+consumer_secret: 
+
+# Information for the user's API access token.
+access_token: 
+access_token_secret:
+
+[following]
+# Space-separated, case-sensitive office titles, one of which must be found in an account's description in order to follow..
+office_titles: President Governor Mayor Senator Senate House Congress Congressional Representative Senator Minister Parliament MP Secretary
+
+# Space-separated, case-INsensitive words that will, when found in an account description, prevent following.
+foil_words: correspondent journalist host report reporter anchor contributor press ceo adviser singer americans running
+
+# Minimum followers a person needs in order to be followed
+minimum_followers: 25000
+
+# Should people be verified for you to follow them?
+verified: true
