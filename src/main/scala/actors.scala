@@ -38,7 +38,7 @@ object FollowerTrawler extends HasConfig {
 
     when(GettingIds) {
       case Event(Start, data@HaveUser(_, Cursor(id, cursor_str), _)) =>
-        friendGetter ! Friends.Work(id, cursor_str)
+        friendGetter ! FriendGetter.Work(id, cursor_str)
         stay using data
 
       case Event(Continue, HaveUser(ref, Cursor(_, "0"), q)) =>
@@ -53,32 +53,32 @@ object FollowerTrawler extends HasConfig {
         }
   
       case Event(Continue, HaveUser(ref, Cursor(id, cursor_str), q)) =>
-        friendGetter ! Friends.Work(id, cursor_str)
+        friendGetter ! FriendGetter.Work(id, cursor_str)
         stay using HaveUser(ref, Cursor(id, "-1"), q)
     
-      case Event(Friends.Return(user_id, cursor_str, Nil), data: HaveUser) =>
+      case Event(FriendGetter.Return(user_id, cursor_str, Nil), data: HaveUser) =>
         self ! Continue
-        stay using data.withCursor(Cursor(user_id, cursor_str))
+        stay using data.copy(current = Cursor(user_id, cursor_str))
  
-      case Event(Friends.Return(user_id, next_cursor_str, ids), 
+      case Event(FriendGetter.Return(user_id, next_cursor_str, ids), 
         HaveUser(ref, _, q)) =>
         val status = Cursor(user_id, next_cursor_str)
         val jobs = Queue.empty ++ ids.grouped(TweetIO.maxUsersPerRequest).map{
-          FriendInfo.Work(user_id, _)
+          FriendInfoGetter.Work(user_id, _)
         }
         self ! Start
         info("GettingIds -> PopulatingIds")
         goto(PopulatingIds) using 
           HaveJobs(HaveUser(ref, status, q), jobs) 
 
-      case Event(Friends.RateLimited(limitReset, job), data: HaveUser) =>
+      case Event(FriendGetter.RateLimited(limitReset, job), data: HaveUser) =>
         info("FriendGetter rate limited for " + limitReset + "seconds.")
         context.system.scheduler.scheduleOnce(limitReset.seconds) {
           friendGetter ! job 
         }
         stay using data
 
-      case Event(Friends.HttpErr(code, job), data: HaveUser) =>
+      case Event(FriendGetter.HttpErr(code, job), data: HaveUser) =>
         info("FriendGetter HTTP " + code)
         friendGetter ! job 
         stay using data
@@ -95,7 +95,7 @@ object FollowerTrawler extends HasConfig {
         friendInfo ! front
         stay using HaveJobs(user, back)
 
-      case Event(ret: FriendInfo.Return, HaveJobs(user, jobs)) =>
+      case Event(ret: FriendInfoGetter.Return, HaveJobs(user, jobs)) =>
         user.ref ! ret
         if (jobs.isEmpty) {
           info("PopulatingIds -> GettingIds")
@@ -108,14 +108,14 @@ object FollowerTrawler extends HasConfig {
           stay using HaveJobs(user, back)
         }
       
-      case Event(FriendInfo.RateLimited(limitReset, job), data: HaveJobs) => 
+      case Event(FriendInfoGetter.RateLimited(limitReset, job), data: HaveJobs) => 
         info("FriendInfo rate limited for " + limitReset + " seconds.")
         context.system.scheduler.scheduleOnce(limitReset.seconds) {
           friendInfo ! job
         }
         stay using data
 
-      case Event(FriendInfo.HttpErr(code, job), data: HaveJobs) =>
+      case Event(FriendInfoGetter.HttpErr(code, job), data: HaveJobs) =>
         info("FriendInfo HTTP " + code)
         friendInfo ! job
         stay using data 
@@ -133,7 +133,7 @@ object FollowerTrawler extends HasConfig {
       case Start =>
         peopleMachine ! Start
 
-      case FriendInfo.Return(user_id, people) =>
+      case FriendInfoGetter.Return(user_id, people) =>
         info("Supervisor got back " + people.size + " people.")
         followFinder ! FollowFinder.Work(user_id, people)
 
@@ -151,7 +151,7 @@ object FollowerTrawler extends HasConfig {
   }
 
   class FriendGetter extends Actor {
-    import Friends._
+    import FriendGetter._
     
     def receive = {
       case job@Work(user_id, next_cursor_str) => {
@@ -174,7 +174,7 @@ object FollowerTrawler extends HasConfig {
   }
 
   class FriendInfoGetter extends Actor {
-    import FriendInfo._
+    import FriendInfoGetter._
 
     def receive = {
       case job@Work(screen_name, ids) => 
@@ -268,7 +268,7 @@ object FollowerTrawler extends HasConfig {
   type FMsg = FollowerMessage
   case object Start extends FMsg
 
-  object Friends {
+  object FriendGetter {
     case class Work(user_id: String, next_cursor_str: String) extends FMsg
     case class Return(
       user_id: String, 
@@ -278,7 +278,7 @@ object FollowerTrawler extends HasConfig {
     case class RateLimited(timeoutOpt: Int, job: Work) extends FMsg
     case class HttpErr(statusCode: Int, job: Work) extends FMsg
   }
-  object FriendInfo {
+  object FriendInfoGetter {
     case class Work(user_id: String, ids: List[String]) extends FMsg
     case class Return(user_id: String, people: List[Twitterer]) extends FMsg
     case class RateLimited(timeout: Int, job: Work) extends FMsg
@@ -321,13 +321,11 @@ object FollowerTrawler extends HasConfig {
       ref: ActorRef, 
       current: Cursor, 
       backlog: Queue[String]
-    ) extends PMData {
-      def withCursor(other: Cursor) = HaveUser(ref, other, backlog)
-    }
+    ) extends PMData 
 
     case class HaveJobs(
       user: HaveUser,
-      jobs: Queue[FriendInfo.Work]
+      jobs: Queue[FriendInfoGetter.Work]
     ) extends PMData
   }
 }
