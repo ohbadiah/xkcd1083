@@ -1,4 +1,5 @@
 * test FSM actor
+* decouple twitter API from I/O (general cake-patternification?)
 * persist search state
 * convert user_ids to Twitterers before commencing work, include in logging
 * switch to Akka logging, consider using Typesafe config library
