@@ -1,10 +1,10 @@
 package xkcd1083
 
 import grizzled.slf4j.Logging
-import dispatch.Http
 
 import akka.actor.{ActorSystem, Props}
 
+/** Starts the FollowerTrawler. */
 object Main extends Logging with App {
   override def main(args: Array[String]) = {
       import FollowerTrawler.{TrawlerSupervisor, Start}

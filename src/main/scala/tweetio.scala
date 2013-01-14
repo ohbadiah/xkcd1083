@@ -12,11 +12,16 @@ import TwitterJsonProtocol._
 
 import scala.concurrent.{ExecutionContext, Future}
 
+/** Contains methods for hitting the twitter API relevant to 
+ *  traversing the follower graph. */
 object TweetIO extends HasConsumerKey with HasAccessToken {
   import PromiseImplicits._
+  
+  /** Registers the Ning async http client with Akka. */
   implicit def ec: ExecutionContext = 
     ExecutionContext.fromExecutor(Http.promiseExecutor)
-  
+ 
+  /** Gets the authenticated user's timeline. */ 
   def timeline: Future[List[Tweet]] = 
     oauthRequest[List[Tweet]](
       twitterApi / "statuses" / "home_timeline.json",
@@ -26,9 +31,10 @@ object TweetIO extends HasConsumerKey with HasAccessToken {
       )
     )
 
+  /** Pulls down 5000 account id's the given user follows. */
   def friends(
-    user_id: String = "705215413", 
-    cursor_str: String = "-1"
+    user_id: String = "705215413", // @xkcd1083's id
+    cursor_str: String = "-1" // -1 signifies beginning, 0 the end.
   ): Future[FriendResponse] = 
     oauthRequest[FriendResponse](
       twitterApi / "friends" / "ids.json",
@@ -39,7 +45,9 @@ object TweetIO extends HasConsumerKey with HasAccessToken {
       )
     )
 
-  val maxUsersPerRequest = 100
+  val maxUsersPerRequest = 100 
+
+  /** Turns up to 100 user id's into Twitterer values. */
   def users(ids: List[String]): Future[List[Twitterer]] = 
     oauthRequest[List[Twitterer]](
       twitterApi / "users" / "lookup.json",
@@ -50,6 +58,7 @@ object TweetIO extends HasConsumerKey with HasAccessToken {
       isGet = false
     )
 
+  /** Cause the authenticated user to start following the given user. */
   def follow(id_str: String): Future[Twitterer] = 
     oauthRequest[Twitterer](
       twitterApi / "friendships" / "create.json",
@@ -59,7 +68,8 @@ object TweetIO extends HasConsumerKey with HasAccessToken {
       ),
       isGet = false
     )
-      
+     
+  /** Generic method for carrying out oauth request. */ 
   def oauthRequest[T: JsonReader](
     target: RequestBuilder,
     params: Traversable[(String, String)],
@@ -73,10 +83,13 @@ object TweetIO extends HasConsumerKey with HasAccessToken {
     ).either
   }
   
+  /** Represents the endpoint https://api.twitter.com/1.1 */ 
   def twitterApi =
     host("api.twitter.com").secure / "1.1"
 }
 
+/** Handles rate-limited (i.e. HTTP 429) responses specifically in addition to
+ * generic handling for non-200 responses. */
 class RateLimitHandler[T](f: Response => T) extends AsyncCompletionHandler[T] {
     def onCompleted(r: Response) = {
       val code: Int = r.getStatusCode
@@ -88,11 +101,13 @@ class RateLimitHandler[T](f: Response => T) extends AsyncCompletionHandler[T] {
     }
 }
 
+/** The Exception representing a rate-limited response. */
 case class RateLimitedResponse(
   limitResetOption: Option[Int]
 ) extends Exception {
   private[this] val now = (System.currentTimeMillis / 1000).toInt
   val defaultTimeoutSecs: Int = 60
+  /** Find how many seconds from now until the rate limit window resets. */
   def limitReset: Int = limitResetOption map 
     {_ - now} getOrElse(defaultTimeoutSecs)
 }

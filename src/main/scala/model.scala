@@ -9,6 +9,7 @@ case class Tweet(
 
 object Tweet
 
+//* Model of a twitter account. */
 case class Twitterer(
   id_str: String,
   name: String,
@@ -20,6 +21,7 @@ case class Twitterer(
 )
 object Twitterer
 
+//* Represents the API response to a request for an account's friends. */
 case class FriendResponse(
   previous_cursor_str: String,
   next_cursor_str: String,
@@ -27,7 +29,7 @@ case class FriendResponse(
 )
 object FriendResponse
 
-
+//* spray-json implicits for parsing JSON representing the above. */
 object TwitterJsonProtocol extends DefaultJsonProtocol {
   implicit val twittererFormat = jsonFormat7(Twitterer.apply)
   implicit val tweetFormat = jsonFormat2(Tweet.apply)

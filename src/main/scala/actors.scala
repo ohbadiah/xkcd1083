@@ -12,8 +12,16 @@ import dispatch.StatusCode
 
 import scala.collection.immutable.Queue
 
+/** An Actor system that traverses the twitter follower graph starting with 
+ * the authenticated user's friends, following subsequent accounts based on 
+ * criteria defined in an external configuration file. */
 object FollowerTrawler extends HasConfig {
-    
+   
+  /** A finite state machine that operates on two levels, first getting user 
+   * ID's for those who the authenticated account follows, then turning those 
+   * id's into  full-blown Twitterer instances. The two associated API calls 
+   * have different rate limits, the latter being the limiting factor meaning a 
+   * maximum of 180 x 100 users may be provided per 15-minute window. */
   class PeopleMachine extends Actor with FSM[PMState, PMData] with Logging {
     import PeopleMachine._
 
@@ -36,11 +44,13 @@ object FollowerTrawler extends HasConfig {
         goto(GettingIds) using HaveUser(ref, Cursor(current_user, "-1"), q)
     }
 
+    // The state for getting raw ID's to be populated later.
     when(GettingIds) {
       case Event(Start, data@HaveUser(_, Cursor(id, cursor_str), _)) =>
         friendGetter ! FriendGetter.Work(id, cursor_str)
         stay using data
-
+      
+      // We got to the end of a user's id's.
       case Event(Continue, HaveUser(ref, Cursor(_, "0"), q)) =>
         if (q.isEmpty) {
           info("GettingIds -> Uninitialized (Finished!)")
@@ -51,15 +61,18 @@ object FollowerTrawler extends HasConfig {
           self ! Continue
           stay using HaveUser(ref, Cursor(front, "-1"), back)
         }
-  
-      case Event(Continue, HaveUser(ref, Cursor(id, cursor_str), q)) =>
+      
+      // More id's plz
+      case Event(Continue, data@HaveUser(_, Cursor(id, cursor_str), _)) =>
         friendGetter ! FriendGetter.Work(id, cursor_str)
-        stay using HaveUser(ref, Cursor(id, "-1"), q)
-    
+        stay using data 
+      
+      // User follows no one
       case Event(FriendGetter.Return(user_id, cursor_str, Nil), data: HaveUser) =>
         self ! Continue
         stay using data.copy(current = Cursor(user_id, cursor_str))
- 
+
+      // Here are your id's. 
       case Event(FriendGetter.Return(user_id, next_cursor_str, ids), 
         HaveUser(ref, _, q)) =>
         val status = Cursor(user_id, next_cursor_str)
@@ -84,17 +97,21 @@ object FollowerTrawler extends HasConfig {
         stay using data
     }
 
+    // The state for populating ID's.
     when(PopulatingIds) {
+      // Handed empty work queue. Should never happen.
       case Event(Start, HaveJobs(user, jobs)) if jobs.isEmpty => 
         self ! Continue
         info("PopulatingIds -> GettingIds")
         goto(GettingIds) using user
 
+      // Initial state
       case Event(Start, HaveJobs(user, jobs)) => 
         val (front, back) = jobs.dequeue
         friendInfo ! front
         stay using HaveJobs(user, back)
 
+      // Got Twitterers back. The only place for the machine's output.
       case Event(ret: FriendInfoGetter.Return, HaveJobs(user, jobs)) =>
         user.ref ! ret
         if (jobs.isEmpty) {
@@ -122,8 +139,10 @@ object FollowerTrawler extends HasConfig {
     }
   }
 
+  /** The top of the system hierarchy. Gets back Twitterers from 
+   * the PeopleMachine, sends them off to be analyzed, and follows
+   * those that pass the analysis. */
   class TrawlerSupervisor extends Actor with Logging {
-    import TrawlerSupervisor._
 
     val peopleMachine = context.actorOf(Props[PeopleMachine])
     val followFinder = context.actorOf(Props[FollowFinder])
@@ -150,6 +169,8 @@ object FollowerTrawler extends HasConfig {
     }
   }
 
+  /** Wraps the TweetIO.friends API call, recovering 
+   * in the event of HTTP error or rate limit. */
   class FriendGetter extends Actor {
     import FriendGetter._
     
@@ -173,6 +194,8 @@ object FollowerTrawler extends HasConfig {
     }
   }
 
+  /** Wraps the TweetIO.users API call, recovering 
+   * in the event of HTTP error or rate limit. */
   class FriendInfoGetter extends Actor {
     import FriendInfoGetter._
 
@@ -193,7 +216,9 @@ object FollowerTrawler extends HasConfig {
         }
     }
   }
-
+  
+  /** Bottom-level actor that filters Twitterer objects to see
+   * who should be followed according to configuration-defined criteria. */
   class FollowFinder extends Actor {
     import FollowFinder._ 
 
@@ -243,6 +268,7 @@ object FollowerTrawler extends HasConfig {
     }
   }
 
+  //* Wraps the TweetIO.follow call, recovering in the event of HTTP error. */
   class Follower extends Actor {
     import Follower._
 
@@ -264,10 +290,14 @@ object FollowerTrawler extends HasConfig {
     }
   }
 
+  /** Immutable actor message api trait. */
   sealed trait FollowerMessage
   type FMsg = FollowerMessage
+ 
+  /** Generic Start message. */ 
   case object Start extends FMsg
 
+  /** Contains the FriendGetter's language. */
   object FriendGetter {
     case class Work(user_id: String, next_cursor_str: String) extends FMsg
     case class Return(
@@ -278,28 +308,31 @@ object FollowerTrawler extends HasConfig {
     case class RateLimited(timeoutOpt: Int, job: Work) extends FMsg
     case class HttpErr(statusCode: Int, job: Work) extends FMsg
   }
+  /** Contains the FriendInfoGetter's language. */
   object FriendInfoGetter {
     case class Work(user_id: String, ids: List[String]) extends FMsg
     case class Return(user_id: String, people: List[Twitterer]) extends FMsg
     case class RateLimited(timeout: Int, job: Work) extends FMsg
     case class HttpErr(statusCode: Int, job: Work) extends FMsg
   }
+  /** Contains the FollowFinder's language. */
   object FollowFinder {
     case class Work(user_id: String, people: List[Twitterer]) extends FMsg
     case class Return(user_id: String, people: List[Twitterer]) extends FMsg
   }
+  /** Contains the Follower's language. */
   object Follower {
     case class Work(id_str: String) extends FMsg 
     case class Return(person: Twitterer) extends FMsg
     case class HttpErr(statusCode: Int, job: Work) extends FMsg
   }
-  object TrawlerSupervisor {
-    case object TrawlNext extends FMsg
-  }
 
-
+  /** The trait for all states of the PeopleMachine FSM. */
   sealed trait PMState
+  /** The trait for all data of the PeopleMachine FSM. */
   sealed trait PMData
+  /** Contains the language for the PeopleMachine as well as all 
+   * of its states and data. */
   object PeopleMachine {
     case object Continue extends FMsg
     case class QueueUp(ids: List[String]) extends FMsg
@@ -308,21 +341,29 @@ object FollowerTrawler extends HasConfig {
     case object GettingIds extends PMState
     case object PopulatingIds extends PMState
     case object Inconsistent extends PMState
-    
-    case object Empty extends PMData
 
+    /** Represents a position in a user's friend stream. */ 
     case class Cursor(
       user_id: String, 
       next_cursor_str: String
-    ) extends PMData
+    )
+ 
+    /** Don't know anything. */
+    case object Empty extends PMData
+    
+    /** We know who we will send our output to. */
     case class HaveSender(ref: ActorRef) extends PMData
 
+    /** We know who we will send our output to,
+     *  which user accounts we will explore. */
     case class HaveUser(
       ref: ActorRef, 
       current: Cursor, 
       backlog: Queue[String]
     ) extends PMData 
 
+    /** We know who we will send our output to, which user accounts we will 
+     * explore, and some id's we want to turn into Twitterers. */
     case class HaveJobs(
       user: HaveUser,
       jobs: Queue[FriendInfoGetter.Work]
