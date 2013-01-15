@@ -17,8 +17,8 @@ class TwitterActorSuite extends FunSuite {
   test("We follow people.") {
     val actorRef = TestActorRef[FriendGetter]
     val result = Await.result(
-      (actorRef ? Friends.Work("705215413", "-1")), timeout.duration)
-        .asInstanceOf[Friends.Return]
+      (actorRef ? FriendGetter.Work("705215413", "-1")), timeout.duration)
+        .asInstanceOf[FriendGetter.Return]
     assert(! result.ids.isEmpty)
   }
 
@@ -26,8 +26,8 @@ class TwitterActorSuite extends FunSuite {
     val actorRef = TestActorRef[FriendInfoGetter]
     val ids = List("16789970", "90484508")
     val result = Await.result(
-      (actorRef ? FriendInfo.Work("xkcd1083", ids)), timeout.duration)
-        .asInstanceOf[FriendInfo.Return]
+      (actorRef ? FriendInfoGetter.Work("xkcd1083", ids)), timeout.duration)
+        .asInstanceOf[FriendInfoGetter.Return]
     assert(! result.people.isEmpty && result.people.forall{ _.verified })
   }
   
