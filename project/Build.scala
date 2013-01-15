@@ -1,16 +1,11 @@
 import sbt._
 import Keys._
-import sbtassembly.Plugin._
-import AssemblyKeys._
-
 
 object XkcdBuild extends Build {
-  System.setProperty("org.clapper.avsl.config", "avsl.conf")
 
   lazy val root = Project(
     id = "xkcd1083", 
-    base = file("."),
-    settings = Project.defaultSettings ++ assemblySettings
+    base = file(".")
   ).settings(
       version := "0.1",
       organization := "me.thefalcon",
